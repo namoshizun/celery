@@ -447,7 +447,7 @@ def build_tracer(name, task, loader=None, hostname=None, store_errors=True,
                 try:
                     if task_before_start:
                         task_before_start(uuid, args, kwargs)
-
+                    print(f'[trace_task] calling task function {fun}')
                     R = retval = fun(*args, **kwargs)
                     state = SUCCESS
                 except Reject as exc:
@@ -479,6 +479,7 @@ def build_tracer(name, task, loader=None, hostname=None, store_errors=True,
                         # so that the trail's not added multiple times :(
                         # (Issue #1936)
                         callbacks = task.request.callbacks
+                        print(f'[trace_task] callbacks {callbacks}')
                         if callbacks:
                             if len(task.request.callbacks) > 1:
                                 sigs, groups = [], []

@@ -17,6 +17,7 @@ import gc
 import os
 import select
 import time
+import random
 from collections import Counter, deque, namedtuple
 from io import BytesIO
 from numbers import Integral
@@ -254,6 +255,7 @@ class ResultHandler(_pool.ResultHandler):
                       __read__=__read__, readcanbuf=readcanbuf,
                       BytesIO=BytesIO, unpack_from=unpack_from,
                       load=_pickle.load):
+        print(f'[_recv_message] reading result from {fd}')
         Hr = Br = 0
         if readcanbuf:
             buf = bytearray(4)
@@ -278,6 +280,7 @@ class ResultHandler(_pool.ResultHandler):
                 Hr += n
 
         body_size, = unpack_from('>i', bufv)
+        print(f'[_recv_message] body size is {body_size}')
         if readcanbuf:
             buf = bytearray(body_size)
             bufv = memoryview(buf)
@@ -316,6 +319,7 @@ class ResultHandler(_pool.ResultHandler):
         recv_message = self._recv_message
 
         def on_result_readable(fileno):
+            print(f'[on_result_readable] result at {fileno} is now readable')
             try:
                 fileno_to_outq[fileno]
             except KeyError:  # process gone
@@ -591,7 +595,9 @@ class AsynPool(_pool.Pool):
             self._discard_tref(job)
 
     def on_job_ready(self, job, i, obj, inqW_fd):
+        print(f'[on_job_ready] {job} is ready, going to remove worker whose inq fd is {inqW_fd} from busy workers')
         self._mark_worker_as_available(inqW_fd)
+        print(f'[on_job_ready] busy workers are now {self._busy_workers}')
 
     def _create_process_handlers(self, hub):
         """Create handlers called on process up/down, etc."""
@@ -765,10 +771,13 @@ class AsynPool(_pool.Pool):
                 add_cond = outbound
 
             if add_cond:  # calling hub_add vs hub_remove
+                print(f'[on_poll_start] inactive = {inactive}, active writes = {active_writes} outbound = {outbound}')
                 iterate_file_descriptors_safely(
                     inactive, all_inqueues, hub_add,
                     None, WRITE | ERR, consolidate=True)
             else:
+                if random.random() < 0.05:
+                    print(f'[on_poll_start] inactive = {inactive}, active writes = {active_writes} outbound = {outbound}. sampled')
                 iterate_file_descriptors_safely(
                     inactive, all_inqueues, hub_remove)
         self.on_poll_start = on_poll_start
@@ -805,6 +814,7 @@ class AsynPool(_pool.Pool):
             # on event loop implementation (i.e, select/poll vs epoll), so
             # have to test further]
             num_ready = len(ready_fds)
+            print(f'[schedule_writes] number of ready i/o fds {num_ready}')
 
             for _ in range(num_ready):
                 ready_fd = ready_fds[total_write_count[0] % num_ready]
@@ -814,11 +824,14 @@ class AsynPool(_pool.Pool):
                     continue
                 if is_fair_strategy and ready_fd in busy_workers:
                     # worker is already busy with another task
+                    print(f'[schedule_writes] {ready_fd} is busy, so skip it')
                     continue
                 if ready_fd not in all_inqueues:
+                    print(f'[schedule_writes] {ready_fd} is already stale, so remove it')
                     hub_remove(ready_fd)
                     continue
                 try:
+                    print('[schedule_writes] pop message from the outbound deque')
                     job = pop_message()
                 except IndexError:
                     # no more messages, remove all inactive fds from the hub.
@@ -886,6 +899,7 @@ class AsynPool(_pool.Pool):
             # was written.  If the broker connection is lost
             # and no data was written the operation shall be canceled.
             header, body, body_size = job._payload
+            print(f'[_write_job] body size is {body_size}, writing to {fd}. {proc} should pick it up')
             errors = 0
             try:
                 # job result keeps track of what process the job is sent to.
@@ -1118,6 +1132,7 @@ class AsynPool(_pool.Pool):
         self._fileno_to_inq[proc.inqW_fd] = proc
         self._fileno_to_synq[proc.synqW_fd] = proc
         self._all_inqueues.add(proc.inqW_fd)
+        print(f'[on_process_alive] {proc} is live. all inqueues write fd = {self._all_inqueues}')
 
     def on_job_process_down(self, job, pid_gone):
         """Called for each job when the process assigned to it exits."""
